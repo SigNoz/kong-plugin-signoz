@@ -1,0 +1,8 @@
+servroot
+*.rock
+.pongo/.ash_history
+.pongo/.bash_history
+luacov.stats.out
+luacov.report.out
+luacov.report.html
+.containerid
