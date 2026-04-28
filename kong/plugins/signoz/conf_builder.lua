@@ -11,7 +11,6 @@ local signoz_conf_cache = setmetatable({}, { __mode = "k" })
 ---@field exporter SignozExporterUserConf
 ---@field traces   { enabled: boolean, sampling_rate: number }
 ---@field logs     { instrumentations: string[] }
----@field metrics  { instrumentations: string[] }
 
 ---@class SignozExporterUserConf
 ---@field endpoint        string

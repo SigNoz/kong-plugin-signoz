@@ -92,22 +92,6 @@ return {
                 } },
               },
           } },
-          { metrics = {
-              type = "record",
-              fields = {
-                { instrumentations = {
-                    type    = "array",
-                    default = { "off" },
-                    elements = {
-                      type   = "string",
-                      one_of = { "off", "all",
-                                 "status_code_metrics",
-                                 "latency_metrics",
-                                 "bandwidth_metrics" },
-                    },
-                } },
-              },
-          } },
         },
     } },
   },
