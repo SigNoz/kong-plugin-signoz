@@ -1,12 +1,23 @@
+# This file is the top-most EditorConfig file
 root = true
 
+# All Files
 [*]
-charset = utf-8
 end_of_line = lf
-insert_final_newline = true
-trim_trailing_whitespace = true
+charset = utf-8
 indent_style = space
 indent_size = 2
+insert_final_newline = true
+trim_trailing_whitespace = true
 
+# Markdown Files
+[*.{md,mdx}]
+trim_trailing_whitespace = false
+
+# Tab indentation
 [Makefile]
 indent_style = tab
+
+# see https://github.com/CppCXY/EmmyLuaCodeStyle
+[*.lua]
+align_continuous_assign_statement = false

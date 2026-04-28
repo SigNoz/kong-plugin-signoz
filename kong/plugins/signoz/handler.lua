@@ -1,144 +1,63 @@
-local otel_handler = require "kong.plugins.opentelemetry.handler"
+local kong = kong
+local ngx  = ngx
+
+local otel_handler  = require("kong.plugins.opentelemetry.handler")
+local Queue         = require("kong.tools.queue")
+
+local meta          = require("kong.plugins.signoz.meta")
+local kong_compat   = require("kong.plugins.signoz.kong_compat")
+local conf_builder  = require("kong.plugins.signoz.conf_builder")
+local logs          = require("kong.plugins.signoz.logs")
+local logs_exporter = require("kong.plugins.signoz.logs.exporter")
+local traces        = require("kong.plugins.signoz.traces")
 
 local SignozHandler = {
-  VERSION  = "0.0.1",
+  VERSION  = meta.VERSION,
   PRIORITY = 14,
 }
 
-local otel_conf_cache = setmetatable({}, { __mode = "k" })
-local logs_unsupported_warned = false
-
--- Populated on first phase call from PDK values. Doing this lazily keeps
--- handler.lua free of Kong-core internal requires for version detection.
-local detected = false
-local is_kong_3_7_plus = false
-local is_kong_3_8_plus = false
-local logs_runtime_supported = false
-local hostname = nil
-local node_id = nil
-
-local function detect_once()
-  if detected then
-    return
-  end
-
-  local version_str = kong.version or "0.0"
-  local major, minor = version_str:match("^(%d+)%.(%d+)")
-  major = tonumber(major) or 0
-  minor = tonumber(minor) or 0
-  is_kong_3_7_plus = (major > 3) or (major == 3 and minor >= 7)
-  is_kong_3_8_plus = (major > 3) or (major == 3 and minor >= 8)
-  logs_runtime_supported = is_kong_3_8_plus
-    and type(otel_handler.configure) == "function"
-
-  -- PDK: kong.node.get_hostname() / get_id(). Wrapped defensively in case a
-  -- forked or minor variant lacks one of them.
-  local ok, v = pcall(kong.node.get_hostname)
-  if ok then hostname = v end
-  ok, v = pcall(kong.node.get_id)
-  if ok then node_id = v end
-
-  detected = true
-end
-
-local function strip_trailing_slash(url)
-  if url:sub(-1) == "/" then
-    return url:sub(1, -2)
-  end
-  return url
-end
+local runtime_unsupported_warned = false
 
 local function traces_enabled(conf)
   return conf.traces and conf.traces.enabled
 end
 
-local function logs_enabled(conf)
-  return conf.logs and conf.logs.enabled
-end
-
-local function warn_logs_unsupported_once()
-  if not logs_unsupported_warned then
-    kong.log.warn("signoz: logs require Kong >= 3.8; disabling log export")
-    logs_unsupported_warned = true
+---@param conf SignozUserConf
+---@param name string
+---@return boolean
+local function log_subtype_enabled(conf, name)
+  local list = conf.logs and conf.logs.instrumentations
+  if not list or #list == 0 then
+    return false
   end
-end
-
-local function build_otel_conf(conf)
-  local cached = otel_conf_cache[conf]
-  if cached then
-    return cached
-  end
-
-  local base = strip_trailing_slash(conf.ingestion.endpoint)
-
-  local headers
-  if conf.ingestion.key and conf.ingestion.key ~= "" then
-    headers = { ["signoz-ingestion-key"] = conf.ingestion.key }
-  end
-
-  local resource_attributes = {
-    ["service.name"] = conf.service_name or "kong",
-  }
-  if conf.deployment_environment then
-    resource_attributes["deployment.environment"] = conf.deployment_environment
-  end
-  if hostname then
-    resource_attributes["host.name"] = hostname
-  end
-  if node_id then
-    resource_attributes["service.instance.id"] = node_id
-  end
-
-  local otel_conf = {
-    headers             = headers,
-    resource_attributes = resource_attributes,
-    sampling_rate       = conf.traces and conf.traces.sampling_rate or 1.0,
-    connect_timeout     = 1000,
-    send_timeout        = 5000,
-    read_timeout        = 5000,
-    queue = {
-      name                 = "signoz",
-      max_batch_size       = 200,
-      max_entries          = 10000,
-      max_coalescing_delay = 3,
-      max_retry_time       = 60,
-      initial_retry_delay  = 0.01,
-      max_retry_delay      = 60,
-      concurrency_limit    = 1,
-    },
-  }
-
-  if is_kong_3_7_plus then
-    otel_conf.propagation = { default_format = "w3c" }
-  else
-    otel_conf.header_type = "w3c"
-  end
-
-  if traces_enabled(conf) then
-    local traces_url = base .. "/v1/traces"
-    if is_kong_3_8_plus then
-      otel_conf.traces_endpoint = traces_url
-    else
-      otel_conf.endpoint = traces_url
+  for _, v in ipairs(list) do
+    if v == "off" then
+      return false
+    end
+    if v == "all" or v == name then
+      return true
     end
   end
-  if logs_enabled(conf) and logs_runtime_supported then
-    otel_conf.logs_endpoint = base .. "/v1/logs"
-  end
-
-  otel_conf_cache[conf] = otel_conf
-  return otel_conf
+  return false
 end
 
+local function warn_runtime_unsupported_once()
+  if not runtime_unsupported_warned then
+    kong.log.warn("signoz: logs.instrumentations 'runtime' requires Kong >= 3.8; skipping")
+    runtime_unsupported_warned = true
+  end
+end
+
+---@param configs SignozUserConf[]
 function SignozHandler:configure(configs)
-  detect_once()
-  if not configs or not logs_runtime_supported then
+  kong_compat.detect_once()
+  if not configs or not kong_compat.is_kong_3_8_plus then
     return
   end
   local mapped = {}
   for _, c in ipairs(configs) do
-    if logs_enabled(c) then
-      mapped[#mapped + 1] = build_otel_conf(c)
+    if log_subtype_enabled(c, "runtime") then
+      mapped[#mapped + 1] = conf_builder.otel_conf(c)
     end
   end
   if #mapped > 0 then
@@ -146,36 +65,54 @@ function SignozHandler:configure(configs)
   end
 end
 
+---@param conf SignozUserConf
 function SignozHandler:access(conf)
-  detect_once()
+  kong_compat.detect_once()
   if not traces_enabled(conf) then
     return
   end
-  otel_handler:access(build_otel_conf(conf))
+  otel_handler:access(conf_builder.otel_conf(conf))
 end
 
+---@param conf SignozUserConf
 function SignozHandler:header_filter(conf)
-  detect_once()
+  kong_compat.detect_once()
   if not traces_enabled(conf) then
     return
   end
-  otel_handler:header_filter(build_otel_conf(conf))
+  otel_handler:header_filter(conf_builder.otel_conf(conf))
 end
 
+---@param conf SignozUserConf
 function SignozHandler:log(conf)
-  detect_once()
-  local do_traces = traces_enabled(conf)
-  local do_logs   = logs_enabled(conf)
+  kong_compat.detect_once()
+  local do_traces       = traces_enabled(conf)
+  local do_access_logs  = log_subtype_enabled(conf, "access")
+  local do_runtime_logs = log_subtype_enabled(conf, "runtime")
 
-  if do_logs and not logs_runtime_supported then
-    warn_logs_unsupported_once()
+  if do_runtime_logs and not kong_compat.is_kong_3_8_plus then
+    warn_runtime_unsupported_once()
+    do_runtime_logs = false
   end
 
-  if not (do_traces or (do_logs and logs_runtime_supported)) then
-    return
+  if do_traces then
+    traces.decorate()
   end
 
-  otel_handler:log(build_otel_conf(conf))
+  if do_traces or do_runtime_logs then
+    otel_handler:log(conf_builder.otel_conf(conf))
+  end
+
+  if do_access_logs then
+    local message = kong.log.serialize()
+    local span    = (ngx.ctx.KONG_SPANS or {})[1]
+    local record  = logs.build_record(message, span)
+    local sc      = conf_builder.signoz_conf(conf)
+    local ok, err = Queue.enqueue(sc.queue, logs_exporter.post, sc, record)
+    if not ok then
+      kong.log.err("signoz: failed to enqueue access log: ", err)
+    end
+  end
 end
 
 return SignozHandler

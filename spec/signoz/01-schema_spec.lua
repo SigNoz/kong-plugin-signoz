@@ -12,9 +12,9 @@ end
 
 describe(PLUGIN_NAME .. ": (schema)", function()
 
-  it("accepts a cloud config with ingestion.key", function()
+  it("accepts a cloud config with exporter.key", function()
     local ok, err = validate({
-      ingestion = {
+      exporter = {
         endpoint = "https://ingest.us.signoz.cloud:443",
         key = "test-key",
       },
@@ -23,74 +23,84 @@ describe(PLUGIN_NAME .. ": (schema)", function()
     assert.is_truthy(ok)
   end)
 
-  it("accepts a self-hosted config without ingestion.key", function()
+  it("accepts a self-hosted config without exporter.key", function()
     local ok, err = validate({
-      ingestion = {
-        endpoint = "http://ingest.us.signoz.cloud:443",
+      exporter = {
+        endpoint = "http://signoz-otel-collector:4318",
       },
     })
     assert.is_nil(err)
     assert.is_truthy(ok)
   end)
 
-  it("rejects missing ingestion.endpoint", function()
-    local ok, err = validate({
-      ingestion = {
-        key = "test-key",
-      },
-    })
+  it("rejects missing exporter.endpoint", function()
+    local ok, err = validate({ exporter = { key = "test-key" } })
     assert.is_falsy(ok)
     assert.is_truthy(err)
   end)
 
-  it("rejects missing ingestion block entirely", function()
-    local ok, err = validate({
-      service_name = "kong",
-    })
+  it("rejects missing exporter block entirely", function()
+    local ok, err = validate({ resource = { service_name = "kong" } })
     assert.is_falsy(ok)
     assert.is_truthy(err)
   end)
 
   it("rejects sampling_rate out of range", function()
     local ok, err = validate({
-      ingestion = {
-        endpoint = "http://localhost:4318",
-      },
+      exporter = { endpoint = "http://localhost:4318" },
       traces = { sampling_rate = 2.0 },
     })
     assert.is_falsy(ok)
     assert.is_truthy(err)
   end)
 
-  it("defaults service_name to 'kong'", function()
+  it("supplies sensible defaults across all groups", function()
     local ok, _, conf = validate({
-      ingestion = {
-        endpoint = "http://localhost:4318",
-      },
+      exporter = { endpoint = "http://localhost:4318" },
     })
     assert.is_truthy(ok)
-    assert.equals("kong", conf.config.service_name)
+    assert.equals("kong", conf.config.resource.service_name)
+    assert.is_true(conf.config.traces.enabled)
+    assert.equals(1.0, conf.config.traces.sampling_rate)
+    assert.same({ "off" }, conf.config.logs.instrumentations)
+    assert.same({ "off" }, conf.config.metrics.instrumentations)
+    assert.equals(1000, conf.config.exporter.connect_timeout)
+    assert.equals(5000, conf.config.exporter.send_timeout)
+    assert.equals(5000, conf.config.exporter.read_timeout)
+    assert.equals(200, conf.config.exporter.queue.max_batch_size)
+    assert.equals(10000, conf.config.exporter.queue.max_entries)
   end)
 
-  it("accepts logs.enabled=true with an endpoint", function()
+  it("accepts logs.instrumentations=[access, runtime]", function()
     local ok, err = validate({
-      ingestion = {
-        endpoint = "http://localhost:4318",
-      },
-      logs = { enabled = true },
+      exporter = { endpoint = "http://localhost:4318" },
+      logs = { instrumentations = { "access", "runtime" } },
     })
     assert.is_nil(err)
     assert.is_truthy(ok)
   end)
 
-  it("accepts traces+logs together", function()
+  it("rejects unknown logs.instrumentations sub-type", function()
     local ok, err = validate({
-      ingestion = {
+      exporter = { endpoint = "http://localhost:4318" },
+      logs = { instrumentations = { "access", "bogus" } },
+    })
+    assert.is_falsy(ok)
+    assert.is_truthy(err)
+  end)
+
+  it("accepts user-tuned exporter.queue + timeouts", function()
+    local ok, err = validate({
+      exporter = {
         endpoint = "http://localhost:4318",
-        key = "test-key",
+        connect_timeout = 500,
+        send_timeout    = 2500,
+        read_timeout    = 2500,
+        queue = {
+          max_batch_size       = 50,
+          max_coalescing_delay = 1,
+        },
       },
-      traces = { enabled = true, sampling_rate = 0.5 },
-      logs   = { enabled = true },
     })
     assert.is_nil(err)
     assert.is_truthy(ok)

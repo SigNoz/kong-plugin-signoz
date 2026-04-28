@@ -1,12 +1,12 @@
 std             = "ngx_lua"
 unused_args     = false
 redefined       = false
-max_line_length = false
+max_line_length = 120
 
 globals = {
   "_KONG",
   "kong",
-  "ngx.IS_CLI",
+  "ngx",
 }
 
 not_globals = {
@@ -14,14 +14,9 @@ not_globals = {
   "table.getn",
 }
 
-ignore = {
-  "6.", -- whitespace warnings
-}
-
 include_files = {
   "**/*.lua",
   "*.rockspec",
-  ".busted",
   ".luacheckrc",
 }
 
