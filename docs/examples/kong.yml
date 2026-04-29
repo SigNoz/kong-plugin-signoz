@@ -1,0 +1,24 @@
+_format_version: "3.0"
+_transform: true
+
+services:
+  - name: echo
+    url: http://echo:8080
+    routes:
+      - name: echo-route
+        paths: ["/echo"]
+
+plugins:
+  - name: signoz
+    config:
+      resource:
+        service_name: kong
+        deployment_environment: dev
+      exporter:
+        endpoint: https://ingest.<region>.signoz.cloud:443
+        key: <your-ingestion-key>
+      traces:
+        enabled: true
+        sampling_rate: 1.0
+      logs:
+        instrumentations: [access, runtime]
