@@ -14,8 +14,8 @@ config:
         service_name: kong
         deployment_environment: dev
     exporter:
-        endpoint: https://ingest.us.staging.signoz.cloud:443
-        key: TjJpmy7lHzHGpwdAjsx0B4CaDP1PF8s06ucO
+        endpoint: <your-ingestion-url>
+        key: <your-ingestion-key>
     traces:
         enabled: true
         sampling_rate: 1.0

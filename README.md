@@ -24,13 +24,17 @@ Install the plugin, enable Kong's tracer, and ship the first request to SigNoz.
 
 ## 1. Install the plugin
 
-On every Kong node:
+The plugin's Lua sources need to be on every Kong node's filesystem. Pick the route that matches your deployment — Kong's [installation and distribution guide](https://developer.konghq.com/custom-plugins/installation-and-distribution/) covers each in depth.
+
+### LuaRocks (host install)
 
 ```sh
 luarocks install kong-plugin-signoz
 ```
 
-Add `signoz` to the loaded plugins in `kong.conf` (or via the `KONG_PLUGINS` environment variable):
+### Load it
+
+After installing, add `signoz` to the loaded plugins in `kong.conf` (or via the `KONG_PLUGINS` environment variable) on every node:
 
 ```ini
 plugins = bundled,signoz
