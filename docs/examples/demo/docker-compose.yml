@@ -1,21 +1,17 @@
-# Local development: Kong DB-less with the plugin source bind-mounted.
-# Edits to kong/plugins/signoz/ apply on `docker compose restart kong`.
+# Demo stack: Kong 3.9 DB-less + plugin source, realistic upstreams and
+# traffic, emitting to SigNoz.
 #
-# For a production-style image that installs the published rock instead,
-# see the Dockerfile next to this file.
+#   SIGNOZ_INGESTION_KEY=<key> docker compose up -d
 services:
   kong:
     image: kong:3.9
-    depends_on: [echo]
+    depends_on: [httpbin]
     environment:
       KONG_DATABASE: "off"
       KONG_DECLARATIVE_CONFIG: /kong/declarative/kong.yml
       KONG_PLUGINS: bundled,signoz
       KONG_LUA_PACKAGE_PATH: /custom/?.lua;/custom/?/init.lua;;
-      KONG_PROXY_ACCESS_LOG: /dev/stdout
-      KONG_ADMIN_ACCESS_LOG: /dev/stdout
       KONG_PROXY_ERROR_LOG: /dev/stderr
-      KONG_ADMIN_ERROR_LOG: /dev/stderr
       KONG_LOG_LEVEL: notice
       KONG_ADMIN_LISTEN: "0.0.0.0:8001"
       KONG_TRACING_INSTRUMENTATIONS: "all"
@@ -24,16 +20,21 @@ services:
       # and allow a full leaf -> intermediate -> root chain
       KONG_LUA_SSL_TRUSTED_CERTIFICATE: system
       KONG_LUA_SSL_VERIFY_DEPTH: "3"
-      # resolved by the {vault://env/signoz-ingestion-key} reference in kong.yml
-      SIGNOZ_INGESTION_KEY: "${SIGNOZ_INGESTION_KEY:-}"
+      SIGNOZ_INGESTION_KEY: "${SIGNOZ_INGESTION_KEY:?set SIGNOZ_INGESTION_KEY}"
     volumes:
       - ./kong.yml:/kong/declarative/kong.yml:ro
-      - ../../kong:/custom/kong:ro
+      - ../../../kong:/custom/kong:ro
     ports:
       - "8000:8000"
       - "8001:8001"
 
-  echo:
-    image: mendhak/http-https-echo:34
-    environment:
-      HTTP_PORT: "8080"
+  httpbin:
+    image: mccutchen/go-httpbin:2.23.1
+    command: ["/bin/go-httpbin", "-port", "8080"]
+
+  traffic:
+    image: curlimages/curl:8.10.1
+    depends_on: [kong]
+    entrypoint: ["/bin/sh", "/traffic.sh"]
+    volumes:
+      - ./traffic.sh:/traffic.sh:ro
