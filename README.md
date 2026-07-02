@@ -1,85 +1,57 @@
 # kong-plugin-signoz
 
-Kong Gateway plugin that ships enriched OTLP traces and structured, trace-correlated request logs to [SigNoz](https://signoz.io) — configured with one endpoint and one ingestion key.
+Kong Gateway plugin that sends traces and request logs to [SigNoz](https://signoz.io).
 
-Built on Kong's bundled [OpenTelemetry plugin](https://developer.konghq.com/plugins/opentelemetry/): trace export is delegated to it, the request span is enriched for SigNoz before export, and one structured log record per request ships alongside. Supports Kong Gateway **3.6+** (open-source and Enterprise), OTLP over HTTP.
+Traces are exported through Kong's bundled [OpenTelemetry plugin](https://developer.konghq.com/plugins/opentelemetry/), with the request span enriched with Kong context: service, route, consumer, and the latency split between Kong and the upstream. Logs are one structured record per request (`GET /payments 200 28ms`), linked to the trace, with the same context as queryable attributes. Headers, query strings, and payloads are never captured.
 
-## What you get in SigNoz
-
-- **Services view** — `kong` appears as a service with request rate, latency percentiles, and error rate.
-- **Traces** — the gateway request span carries standard OTel HTTP attributes plus Kong context: matched service, route, consumer, retry count, and the latency split between Kong and the upstream.
-- **Logs** — one record per request (`GET /payments 200 28ms`), severity-colored by status class, linked to its trace, with the full request context as queryable attributes.
-- **"Is it Kong or the app?"** — every span and log records `kong.latency.gateway_ms` vs `kong.latency.upstream_ms`, so dashboards answer it out of the box.
-
-Headers, query strings, and payloads are never captured.
+Supports Kong Gateway 3.6+ (open-source and Enterprise), OTLP over HTTP.
 
 ## Install
-
-The plugin's Lua sources need to be on every Kong node. Kong's [installation and distribution guide](https://developer.konghq.com/custom-plugins/installation-and-distribution/) covers each deployment shape in depth.
 
 ```sh
 luarocks install kong-plugin-signoz
 ```
 
-Load it — add `signoz` to the plugins list in `kong.conf` (or `KONG_PLUGINS`) on every node:
+Add `signoz` to the plugins list in `kong.conf` (or `KONG_PLUGINS`) on every node:
 
 ```ini
 plugins = bundled,signoz
 ```
 
-## Quickstart
+## Setup
 
-### 1. Enable Kong's tracer
-
-The plugin enriches and exports the spans Kong's own tracer creates, so the tracer must be on (see Kong's [tracing reference](https://developer.konghq.com/gateway/tracing/)):
+1. Enable Kong's tracer (required for traces; logs flow without it):
 
 ```ini
 tracing_instrumentations = all
 tracing_sampling_rate    = 1.0
 ```
 
-Restart Kong to pick up the plugin and tracer settings. If the tracer is off, the plugin warns at startup — request logs still flow; only traces are gated on it.
+2. Get your ingestion endpoint and key: SigNoz Cloud under **Settings → Ingestion** ([docs](https://signoz.io/docs/ingestion/signoz-cloud/keys/)); self-hosted, use your collector's OTLP/HTTP port (`4318`), no key.
 
-### 2. Get your ingestion endpoint and key
-
-- **SigNoz Cloud:** both are under **Settings → Ingestion**. See [Ingestion Keys](https://signoz.io/docs/ingestion/signoz-cloud/keys/).
-- **Self-hosted:** point the endpoint at your OTel collector's OTLP/HTTP port (default `4318`); no key required.
-
-### 3. Enable the plugin
-
-Globally, via the Admin API:
+3. Enable the plugin:
 
 ```sh
 curl -X POST http://localhost:8001/plugins \
   --data "name=signoz" \
   --data "config.exporter.endpoint=https://ingest.<region>.signoz.cloud:443" \
-  --data "config.exporter.key=<your-ingestion-key>" \
-  --data "config.resource.service_name=kong" \
-  --data "config.resource.deployment_environment=production"
+  --data "config.exporter.key=<your-ingestion-key>"
 ```
 
-Traces and request logs are both on by default. The plugin also scopes per service, route, or consumer with standard Kong [plugin precedence](https://developer.konghq.com/gateway/entities/plugin/).
+4. Send a request through the gateway. Kong shows up under Services in SigNoz, spans in the Traces Explorer, one log per request in the Logs Explorer.
 
-### 4. Verify
-
-Send a request through the gateway, then check SigNoz:
-
-- **Services** shows `kong` with traffic.
-- **Traces Explorer** shows gateway spans with `kong.service.name`, `kong.route.name`, and the latency split.
-- **Logs Explorer** shows one record per request, one click away from its trace.
-
-If nothing arrives within ~5 seconds, check Kong's error log for `[signoz]` entries and queue warnings. The most common cause with `https://` endpoints is a missing CA trust store — set `lua_ssl_trusted_certificate = system` and `lua_ssl_verify_depth = 3` (see the [reference](docs/reference.md#configexporter--destination-and-transport)).
+For `https://` endpoints, Kong needs a CA trust store: `lua_ssl_trusted_certificate = system`, `lua_ssl_verify_depth = 3`. Errors are logged with a `[signoz]` prefix and in queue warnings.
 
 ## Configuration
 
 ```yaml
 config:
   resource:
-    service_name: kong               # service.name in SigNoz
+    service_name: kong
     deployment_environment: production
   exporter:
-    endpoint: https://ingest.<region>.signoz.cloud:443   # OTLP/HTTP; http(s) only
-    key: <ingestion-key>             # encrypted; Kong Vault-referenceable
+    endpoint: https://ingest.<region>.signoz.cloud:443   # http(s) only
+    key: <ingestion-key>                                 # Kong Vault-referenceable
   traces:
     enabled: true
     sampling_rate: 1.0
@@ -87,19 +59,18 @@ config:
     enabled: true
 ```
 
-Every field, default, and emitted attribute is documented in the [reference](docs/reference.md).
+All fields, defaults, and emitted attributes: [docs/reference.md](docs/reference.md).
 
-## What this plugin deliberately leaves to Kong
-
-- **Metrics** — use Kong's native OTLP metrics (Gateway 3.13+).
-- **Runtime/error logs** — use Kong's bundled OpenTelemetry plugin.
-
-Enabling the bundled `opentelemetry` plugin alongside this one for the same scope double-exports spans; the plugin warns if it detects that.
+Metrics and runtime/error logs are left to Kong's own plugins: native OTLP metrics (Gateway 3.13+) and the bundled OpenTelemetry plugin.
 
 ## Development
 
-`docs/examples/` has a docker-compose setup running Kong DB-less with the plugin source mounted. Tests: `busted spec/unit`, lint: `luacheck kong spec` (both run in CI).
+`docs/examples/` runs Kong DB-less with the plugin source mounted. Tests: `busted spec/unit`. Lint: `luacheck kong spec`.
 
 ## Support
 
-Developed, tested, and maintained by SigNoz. Issues and questions: [GitHub issues](https://github.com/SigNoz/kong-plugin-signoz/issues) · [SigNoz docs](https://signoz.io/docs/).
+Maintained by SigNoz. [Issues](https://github.com/SigNoz/kong-plugin-signoz/issues) · [Docs](https://signoz.io/docs/integrations/outposts/kong/)
+
+## License
+
+See [LICENSE](LICENSE).
