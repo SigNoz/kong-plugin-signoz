@@ -2,9 +2,29 @@
 
 Kong Gateway plugin that sends traces and request logs to [SigNoz](https://signoz.io).
 
-Traces are exported through Kong's bundled [OpenTelemetry plugin](https://developer.konghq.com/plugins/opentelemetry/), with the request span enriched with Kong context: service, route, consumer, and the latency split between Kong and the upstream. Logs are one structured record per request (`GET /payments 200 28ms`), linked to the trace, with the same context as queryable attributes. Headers, query strings, and payloads are never captured.
+Traces are exported through Kong's bundled [OpenTelemetry plugin](https://developer.konghq.com/plugins/opentelemetry/), with the request span enriched with Kong context: service, route, consumer, and the latency split between Kong and the upstream. Logs are one structured record per request (`GET /payments 200 28ms`), linked to the trace, with the same context as queryable attributes.
 
 Supports Kong Gateway 3.6+ (open-source and Enterprise), OTLP over HTTP.
+
+## What it looks like
+
+Kong as a service in SigNoz, with latency percentiles, request rate, Apdex, and error rate:
+
+![Kong in the SigNoz Services view](docs/assets/services-apm-overview.png)
+
+Gateway traffic in the Traces Explorer, filterable by service, route, consumer, status, or duration:
+
+![Kong spans in the Traces Explorer](docs/assets/traces-explorer.png)
+
+Each trace shows Kong's internal phases in the waterfall. The root span carries the enriched attributes: `http.route`, `kong.consumer.username`, `kong.balancer.tries`, and the `kong.latency.*` split that shows whether time went to Kong or the upstream:
+
+![Trace detail with Kong span attributes](docs/assets/trace-detail-attributes.png)
+
+Every request produces one log record, color-coded by status class. Logs and traces link both ways: a log line opens its trace, and the trace view shows the request's log:
+
+![Logs Explorer with structured request records](docs/assets/logs-explorer.png)
+
+![Request log shown from the trace side](docs/assets/span-to-log-correlation.png)
 
 ## Install
 
@@ -61,7 +81,24 @@ config:
 
 All fields, defaults, and emitted attributes: [docs/reference.md](docs/reference.md).
 
-Metrics and runtime/error logs are left to Kong's own plugins: native OTLP metrics (Gateway 3.13+) and the bundled OpenTelemetry plugin.
+## What gets captured
+
+Each trace span and request log carries:
+
+- **Request:** method, path, scheme, protocol version, user agent
+- **Response:** status code, request and response sizes
+- **Timing:** total duration, split into gateway (Kong) latency and upstream latency
+- **Kong context:** service, route, consumer (when authenticated), retry count, upstream status
+- **Network:** client address, upstream address
+- **Identity:** service name, environment, hostname, node ID, Kong version
+
+Never captured: headers, query strings, request and response payloads.
+
+## Built on Kong
+
+- Trace export is delegated to Kong's bundled OpenTelemetry plugin; the request log is built with Kong's public PDK (`kong.log.serialize`).
+- Metrics and runtime/error logs are left to Kong's own plugins: native OTLP metrics (Gateway 3.13+) and the bundled OpenTelemetry plugin.
+- The plugin warns at startup if the tracer is off, or if the bundled `opentelemetry` plugin is enabled alongside (spans would export twice).
 
 ## Development
 
