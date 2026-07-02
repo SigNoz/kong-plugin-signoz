@@ -1,0 +1,28 @@
+_format_version: "3.0"
+_transform: true
+
+services:
+  - name: payments
+    url: http://echo:8080
+    routes:
+      - name: payments-route
+        paths: ["/payments"]
+  - name: broken
+    url: http://nowhere.invalid:9999
+    routes:
+      - name: broken-route
+        paths: ["/broken"]
+
+plugins:
+  - name: signoz
+    config:
+      resource:
+        service_name: kong
+        deployment_environment: integration-test
+      exporter:
+        endpoint: http://sink:4318
+      traces:
+        enabled: true
+        sampling_rate: 1.0
+      logs:
+        enabled: true

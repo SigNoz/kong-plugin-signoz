@@ -1,0 +1,33 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  unit:
+    name: unit (Kong ${{ matrix.kong }} LuaJIT)
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        kong: ["3.6", "3.9"]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run unit tests in the Kong runtime
+        run: |
+          docker run --rm -v "$PWD:/w" kong:${{ matrix.kong }} \
+            sh -c "/usr/local/openresty/luajit/bin/luajit /w/spec/unit/run.lua"
+
+  integration:
+    name: integration (Kong ${{ matrix.kong }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        kong: ["3.6", "3.7", "3.8", "3.9"]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run integration suite
+        run: KONG_VERSION=${{ matrix.kong }} test/integration/run.sh

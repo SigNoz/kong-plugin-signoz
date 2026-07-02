@@ -12,6 +12,7 @@ Rebuild of the plugin to its final shape. Shape derivation, stakeholder analysis
 | Traces | Delegate export to bundled `opentelemetry` plugin; enrich root span pre-drain |
 | Logs | One **full transaction record** per request from `kong.log.serialize()`; trace-correlated; OTLP/HTTP via `kong.tools.queue` |
 | Not shipped | Metrics (→ Kong native 3.13+), runtime-log forwarding (→ bundled plugin), header/query/payload capture (privacy) |
+| Transport | **OTLP/HTTP only** — `exporter.endpoint` schema-rejects `grpc://`/`grpcs://` |
 | Encoding | Capability-detected: Kong's protobuf encoder when present, self-contained OTLP/HTTP-JSON otherwise; both paths tested |
 | Version | 0.0.1 → **1.0.0**, CHANGELOG, CI matrix per Kong minor |
 

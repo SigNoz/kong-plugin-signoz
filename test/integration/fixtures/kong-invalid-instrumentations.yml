@@ -1,0 +1,8 @@
+_format_version: "3.0"
+plugins:
+  - name: signoz
+    config:
+      exporter:
+        endpoint: http://localhost:4318
+      logs:
+        instrumentations: [access]
