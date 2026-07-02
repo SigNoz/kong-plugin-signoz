@@ -49,7 +49,7 @@ Removed from 0.0.1: `logs.instrumentations` array (`off/all/access/runtime`) and
 | `http.route` (matched route pattern, low-cardinality) | `kong.router.get_route().paths` |
 | `network.protocol.version` | `ngx.req.http_version()` |
 | `user_agent.original` | request header via serialize |
-| `http.request.body.size` / `http.response.body.size` | `serialize().request.size` / `.response.size` |
+| `kong.request.size` / `kong.response.size` | `serialize().request.size` / `.response.size` — Kong reports *total* bytes (headers + body), so the honest name is vendor-namespaced, not semconv `*.body.size` |
 | `kong.latency.gateway_ms` / `kong.latency.upstream_ms` / `kong.latency.total_ms` | `serialize().latencies.kong` / `.proxy` / `.request` |
 | `kong.balancer.tries` | `#serialize().tries` |
 | `kong.upstream.status` (when ≠ client status) | serialize |
@@ -57,7 +57,7 @@ Removed from 0.0.1: `logs.instrumentations` array (`off/all/access/runtime`) and
 
 (Existing kept: `http.request.method`, `url.path`, `url.scheme`, `http.response.status_code`, `client.address`, `server.address`, `kong.service.name/.id`, `kong.route.name/.id`, `kong.consumer.id/.username`.)
 
-**Log record — identity set (existing) + measurements:** `kong.latency.gateway_ms/upstream_ms/total_ms`, `http.request.body.size`, `http.response.body.size`, `kong.balancer.tries`, `kong.upstream.status`. Body/severity/trace-correlation unchanged.
+**Log record — identity set (existing) + measurements:** `kong.latency.gateway_ms/upstream_ms/total_ms`, `kong.request.size`, `kong.response.size`, `kong.balancer.tries`, `kong.upstream.status`. Body/severity/trace-correlation unchanged.
 
 ## Work breakdown
 
@@ -98,6 +98,11 @@ Metrics of any kind · runtime-log forwarding · header/query/payload capture (o
 ## Open items
 
 - Double-enable detection mechanism (M4) — code vs docs-only.
-- `http.route` source: route `paths[]` may hold regex/multiple paths — pick first path or join; verify cardinality behavior.
-- Span error status: confirm Kong span table honors a `status` field through the bundled encoder on 3.6–3.9.
+- Span error status: `error.type` attribute confirmed on the wire; confirm the OTLP `status.code=ERROR` renders as errored in SigNoz UI (verify during M8 capture).
 - Mutual-customer reference disclosure (partnership, not code).
+
+## Resolved during M3
+
+- `http.route`: joins `route.paths` with `,` — one stable low-cardinality value per route.
+- Sizes named `kong.request.size`/`kong.response.size` (Kong totals, not body-only semconv).
+- **Pre-existing protobuf bug fixed:** on Kong 3.9+ (`kong.observability.otlp` present) the adapter passed normalized records straight to `encode_logs`, which pb-encodes as-is — every batch failed with "table expected at field 'body'". The adapter now proto-shapes records (AnyValue body, KeyValue attribute list, per-record trace ids — Kong's own `prepare_logs` assumes one batch-level trace_id, so we transform locally). 3.6–3.8 always used the JSON encoder, which is why 0.0.1 never hit this.

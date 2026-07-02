@@ -56,6 +56,9 @@ local function build_resource_attributes(conf)
   if kong_compat.node_id then
     attrs["service.instance.id"] = kong_compat.node_id
   end
+  if kong_compat.kong_version then
+    attrs["service.version"] = kong_compat.kong_version
+  end
   return attrs
 end
 

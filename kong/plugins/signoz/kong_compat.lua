@@ -5,6 +5,7 @@ local _M = {
   is_kong_3_8_plus = false,
   hostname         = nil,
   node_id          = nil,
+  kong_version     = nil,
 }
 
 local detected = false
@@ -34,6 +35,7 @@ function _M.detect_once()
   end
 
   local version_str = kong.version or "0.0"
+  _M.kong_version = kong.version
   local major, minor = version_str:match("^(%d+)%.(%d+)")
   major = tonumber(major) or 0
   minor = tonumber(minor) or 0

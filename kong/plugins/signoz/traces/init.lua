@@ -1,7 +1,11 @@
 local kong = kong
 local ngx  = ngx
 
+local attributes = require("kong.plugins.signoz.attributes")
+
 local _M = {}
+
+local SPAN_STATUS_ERROR = 2
 
 local get_root_span
 do
@@ -20,17 +24,18 @@ do
   end
 end
 
-local function last_upstream_ip()
-  local ua = ngx.var and ngx.var.upstream_addr
-  if not ua or ua == "" then
-    return nil
+-- Mark the span errored on 5xx. Kong span tables carry a numeric status
+-- field the OTLP encoder picks up; prefer the method when it exists.
+local function set_error_status(span)
+  if type(span.set_status) == "function" then
+    local ok = pcall(span.set_status, span, SPAN_STATUS_ERROR)
+    if ok then return end
   end
-  local last = ua:match("([^,]+)$") or ua
-  last = last:match("^%s*(.-)%s*$") or last
-  return last:match("^([^:]+)") or nil
+  span.status = SPAN_STATUS_ERROR
 end
 
-function _M.decorate()
+---@param message table  Output of kong.log.serialize().
+function _M.decorate(message)
   local span = get_root_span()
   if not span then
     return
@@ -38,25 +43,13 @@ function _M.decorate()
   span.attributes = span.attributes or {}
   local a = span.attributes
 
-  a["http.request.method"]       = kong.request.get_method()
-  a["url.path"]                  = kong.request.get_path()
-  a["url.scheme"]                = kong.request.get_scheme()
-  a["http.response.status_code"] = kong.response.get_status()
-  a["client.address"]            = kong.client.get_forwarded_ip()
+  attributes.merge(a, attributes.identity(message))
+  attributes.merge(a, attributes.measurements(message))
+  attributes.merge(a, attributes.span_extras(message))
 
-  local server = last_upstream_ip()
-  if server then a["server.address"] = server end
-
-  local svc = kong.router.get_service()
-  if svc and svc.name then a["kong.service.name"] = svc.name end
-
-  local rt = kong.router.get_route()
-  if rt and rt.name then a["kong.route.name"] = rt.name end
-
-  local cons = kong.client.get_consumer()
-  if cons then
-    if cons.id       then a["kong.consumer.id"]       = cons.id end
-    if cons.username then a["kong.consumer.username"] = cons.username end
+  local status = tonumber((message.response or {}).status) or 0
+  if status >= 500 then
+    set_error_status(span)
   end
 end
 

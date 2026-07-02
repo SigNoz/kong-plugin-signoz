@@ -48,13 +48,19 @@ function SignozHandler:log(conf)
   local do_traces = traces_enabled(conf)
   local do_logs   = logs_enabled(conf)
 
+  if not do_traces and not do_logs then
+    return
+  end
+
+  -- One serialize() feeds both signals so span and log attributes match.
+  local message = kong.log.serialize()
+
   if do_traces then
-    traces.decorate()
+    traces.decorate(message)
     otel_handler:log(conf_builder.otel_conf(conf))
   end
 
   if do_logs then
-    local message = kong.log.serialize()
     local span    = (ngx.ctx.KONG_SPANS or {})[1]
     local record  = logs.build_record(message, span)
     local sc      = conf_builder.signoz_conf(conf)
