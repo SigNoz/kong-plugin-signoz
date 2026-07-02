@@ -21,7 +21,18 @@ return {
               type = "record",
               required = true,
               fields = {
-                { endpoint = typedefs.url { required = true } },
+                -- OTLP/HTTP only: the log pipeline POSTs via resty.http, and
+                -- a grpc:// endpoint would split transports between signals.
+                { endpoint = typedefs.url {
+                    required = true,
+                    custom_validator = function(v)
+                      local scheme = v:match("^(%w+)://")
+                      if scheme ~= "http" and scheme ~= "https" then
+                        return nil, "must be an http:// or https:// URL (OTLP/HTTP; gRPC is not supported)"
+                      end
+                      return true
+                    end,
+                } },
                 { key = {
                     type          = "string",
                     required      = false,

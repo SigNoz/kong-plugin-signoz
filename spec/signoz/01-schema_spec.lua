@@ -39,6 +39,22 @@ describe(PLUGIN_NAME .. ": (schema)", function()
     assert.is_truthy(err)
   end)
 
+  it("rejects grpc:// exporter.endpoint (OTLP/HTTP only)", function()
+    local ok, err = validate({
+      exporter = { endpoint = "grpc://ingest.us.signoz.cloud:443" },
+    })
+    assert.is_falsy(ok)
+    assert.is_truthy(err)
+  end)
+
+  it("rejects grpcs:// exporter.endpoint (OTLP/HTTP only)", function()
+    local ok, err = validate({
+      exporter = { endpoint = "grpcs://ingest.us.signoz.cloud:443" },
+    })
+    assert.is_falsy(ok)
+    assert.is_truthy(err)
+  end)
+
   it("rejects missing exporter block entirely", function()
     local ok, err = validate({ resource = { service_name = "kong" } })
     assert.is_falsy(ok)
