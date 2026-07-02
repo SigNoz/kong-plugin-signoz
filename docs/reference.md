@@ -1,114 +1,139 @@
-# Configuration
+# Reference
 
-The plugin schema is grouped into three clusters:
+Complete configuration surface and emitted telemetry for `kong-plugin-signoz` v1.x.
 
-- **`resource`** — how this Kong identifies itself in SigNoz.
-- **`exporter`** — where data ships and how the HTTP transport behaves.
-- **`traces`** / **`logs`** — what to capture per signal.
-
-For e.g:
+## Configuration
 
 ```yaml
 config:
-    resource:
-        service_name: kong
-        deployment_environment: dev
-    exporter:
-        endpoint: <your-ingestion-url>
-        key: <your-ingestion-key>
-    traces:
-        enabled: true
-        sampling_rate: 1.0
-    logs:
-        instrumentations: [access, runtime]
+  resource:
+    service_name: kong
+    deployment_environment: production
+  exporter:
+    endpoint: <otlp-http-base-url>     # required
+    key: <ingestion-key>
+  traces:
+    enabled: true
+    sampling_rate: 1.0
+  logs:
+    enabled: true
 ```
 
-## `config.resource` — service identity
+### `config.resource` — service identity
 
 | Field | Required | Default | Notes |
 | --- | --- | --- | --- |
-| `resource.service_name` | no | `kong` | Maps to OTel `service.name` resource attribute. |
-| `resource.deployment_environment` | no | — | Maps to `deployment.environment` resource attribute. |
+| `resource.service_name` | no | `kong` | `service.name` resource attribute. |
+| `resource.deployment_environment` | no | — | `deployment.environment` resource attribute. |
 
-`host.name` and `service.instance.id` are populated automatically from Kong's node metadata.
+`host.name`, `service.instance.id`, and `service.version` (the Kong version) are populated automatically from node metadata.
 
-## `config.exporter` — destination and transport
+### `config.exporter` — destination and transport
 
 | Field | Required | Default | Notes |
 | --- | --- | --- | --- |
-| `exporter.endpoint` | yes | — | Base URL of the SigNoz OTLP/HTTP ingestion endpoint. `/v1/traces` and `/v1/logs` are appended internally. |
-| `exporter.key` | no | — | Sent as the `signoz-ingestion-key` header. Required for SigNoz Cloud, ignored for self-hosted. Referenceable via [Kong Vault](https://developer.konghq.com/gateway/secrets-management/). |
-| `exporter.connect_timeout` | no | `1000` | OTLP-POST connect timeout (ms). |
-| `exporter.send_timeout` | no | `5000` | OTLP-POST send timeout (ms). |
-| `exporter.read_timeout` | no | `5000` | OTLP-POST read timeout (ms). |
+| `exporter.endpoint` | yes | — | Base URL of the SigNoz OTLP/HTTP endpoint; `/v1/traces` and `/v1/logs` are appended internally. **`http://` or `https://` only** — `grpc://`/`grpcs://` are rejected at validation. |
+| `exporter.key` | no | — | Sent as the `signoz-ingestion-key` header. Required for SigNoz Cloud, omit for self-hosted. Encrypted; referenceable via [Kong Vault](https://developer.konghq.com/gateway/secrets-management/). |
+| `exporter.connect_timeout` | no | `1000` | OTLP POST connect timeout (ms). |
+| `exporter.send_timeout` | no | `5000` | OTLP POST send timeout (ms). |
+| `exporter.read_timeout` | no | `5000` | OTLP POST read timeout (ms). |
 
-### `exporter.queue` — batching and retry
+### `config.exporter.queue` — batching and retry
 
-Records are batched per worker and flushed by a background timer.
+Log records batch per worker and flush on a background timer.
 
 | Field | Default | Notes |
 | --- | --- | --- |
 | `queue.max_batch_size` | `200` | Max records per HTTP POST. |
-| `queue.max_entries` | `10000` | Queue capacity per worker. Records past this are dropped and warned. |
-| `queue.max_coalescing_delay` | `3` | Max seconds to hold records before flushing a partial batch. |
-| `queue.max_retry_time` | `60` | Total seconds the retry loop runs before giving up. |
+| `queue.max_entries` | `10000` | Queue capacity per worker; overflow drops with a warning. |
+| `queue.max_coalescing_delay` | `3` | Max seconds to hold a partial batch. |
+| `queue.max_retry_time` | `60` | Total seconds the retry loop runs. |
 | `queue.initial_retry_delay` | `0.01` | Seconds before first retry. |
-| `queue.max_retry_delay` | `60` | Cap on exponential backoff between retries (seconds). |
+| `queue.max_retry_delay` | `60` | Cap on exponential backoff (seconds). |
 
-## `config.traces` — trace export
-
-| Field | Default | Notes |
-| --- | --- | --- |
-| `traces.enabled` | `true` | When `true`, delegates trace export to Kong's bundled [OpenTelemetry plugin](https://developer.konghq.com/plugins/opentelemetry/). |
-| `traces.sampling_rate` | `1.0` | 0–1 probability. Applied per request before export. |
-
-Kong's gateway-level tracer must be on (`tracing_instrumentations`, `tracing_sampling_rate` in `kong.conf`) for any spans to be created in the first place. See Kong's [tracing reference](https://developer.konghq.com/gateway/tracing/) for valid values, and [Getting started](../README.md#2-enable-kongs-tracer) for the minimum config.
-
-Before each root span is encoded, the plugin enriches it with stable OTel HTTP semconv:
-
-- `http.request.method`, `url.path`, `url.scheme`, `http.response.status_code`
-- `client.address`, `server.address`
-
-…and Kong-customer attribution:
-
-- `kong.service.name`, `kong.route.name`
-- `kong.consumer.id`, `kong.consumer.username` (when authenticated)
-
-Legacy attributes that Kong's tracer already sets coexist non-destructively.
-
-## `config.logs` — per-request OTLP log records
+### `config.traces`
 
 | Field | Default | Notes |
 | --- | --- | --- |
-| `logs.instrumentations` | `[off]` | Comma-separated list (curl) or YAML array. Values: `off`, `all`, `access`, `runtime`. |
+| `traces.enabled` | `true` | Delegates trace export to Kong's bundled [OpenTelemetry plugin](https://developer.konghq.com/plugins/opentelemetry/), after enriching the request span (see below). |
+| `traces.sampling_rate` | `1.0` | 0–1 probability, applied per request before export. |
 
-The DSL mirrors Kong's gateway-level [`tracing_instrumentations`](https://developer.konghq.com/gateway/tracing/) — `[off]` ships nothing, `[all]` ships every supported sub-type, otherwise list sub-types by name.
+Kong's gateway tracer must be on for spans to exist at all (`tracing_instrumentations`, `tracing_sampling_rate` — see Kong's [tracing reference](https://developer.konghq.com/gateway/tracing/)). If it is off while `traces.enabled=true`, the plugin logs a warning at configuration time; request logs are unaffected.
 
-### `access` — one structured log record per request
+### `config.logs`
 
-Equivalent in audience to Kong's [HTTP Log](https://developer.konghq.com/plugins/http-log/) or [File Log](https://developer.konghq.com/plugins/file-log/) plugin output, but shipped over OTLP and correlated with traces.
+| Field | Default | Notes |
+| --- | --- | --- |
+| `logs.enabled` | `true` | One structured, trace-correlated OTLP log record per request. |
 
-Each record:
+## Emitted telemetry
 
-- **Body**: compact summary, e.g. `"GET /payments 200 28ms"`.
-- **Severity**: `INFO` for 2xx/3xx, `WARN` for 4xx, `ERROR` for 5xx.
-- **Trace correlation**: `trace_id` / `span_id` populated when a trace is active for the request.
-- **Attributes**: descriptive identity only — method, path, scheme, status, route, service, consumer, client IP, last upstream IP.
+Both signals are built from the same `kong.log.serialize()` snapshot, so span and log attributes always agree.
 
-Excluded by design: latencies and body sizes (those belong on traces or metrics), retry counts, request/response headers (PII + cardinality), querystrings.
+### Resource attributes (all signals)
 
-### `runtime` — Kong's internal logs
+| Attribute | Source |
+| --- | --- |
+| `service.name` | `resource.service_name` (default `kong`) |
+| `deployment.environment` | `resource.deployment_environment` (when set) |
+| `host.name` | Kong node hostname |
+| `service.instance.id` | Kong node ID |
+| `service.version` | Kong version |
 
-Forwards Kong's own runtime logs (warnings, errors, debug output the gateway writes via `kong.log`) over OTLP. Useful when you want gateway operator logs alongside your application telemetry.
+### Request span
 
-### Encoding
+The plugin decorates the root span Kong's tracer creates. Legacy attributes set by Kong's tracer coexist non-destructively. On 5xx responses the span status is set to `ERROR`.
 
-Records batch into an internal queue named `signoz:logs_access` (for `access`) and `signoz:logs` (for `runtime`), then flush via background timer. The wire encoder is selected automatically per Kong version: protobuf when `kong.observability.otlp.encode_logs` is available (Kong 3.9+), OTLP/HTTP-JSON otherwise.
+| Attribute | Notes |
+| --- | --- |
+| `http.request.method` | |
+| `http.route` | Matched route path template(s), comma-joined — low-cardinality |
+| `url.path` | Actual request path, query stripped |
+| `url.scheme` | |
+| `http.response.status_code` | |
+| `network.protocol.version` | e.g. `1.1`, `2` |
+| `user_agent.original` | |
+| `client.address` | Forwarded client IP |
+| `server.address` | Last upstream target IP |
+| `kong.service.name` / `kong.service.id` | Matched Kong service |
+| `kong.route.name` / `kong.route.id` | Matched Kong route |
+| `kong.consumer.id` / `kong.consumer.username` | When authenticated |
+| `kong.latency.gateway_ms` | Time spent inside Kong |
+| `kong.latency.upstream_ms` | Time waiting on the upstream (omitted when no upstream was reached) |
+| `kong.latency.total_ms` | Total request duration |
+| `kong.request.size` / `kong.response.size` | Total bytes (headers + body — Kong's own accounting) |
+| `kong.balancer.tries` | Number of balancer attempts |
+| `kong.upstream.status` | Status returned by the upstream (may differ from the client-facing status) |
+| `error.type` | Status code as string, 5xx only |
+
+### Request log record
+
+| Field | Value |
+| --- | --- |
+| Body | `"<METHOD> <path> <status> <duration>ms"` — e.g. `GET /payments 200 28ms` |
+| Severity | `INFO` 2xx/3xx · `WARN` 4xx · `ERROR` 5xx |
+| `trace_id` / `span_id` | From the request's span, when tracing is active |
+| Attributes | The same identity and measurement set as the span (method, path, scheme, status, addresses, `kong.service/route/consumer.*`, latency split, sizes, tries, upstream status) plus `message.type=kong.access` |
+
+**Never captured** (by design): request/response headers, query strings, payloads.
+
+### Encoding and transport
+
+OTLP over HTTP only. Log records encode with Kong's protobuf OTLP encoder where available (`kong.observability.otlp`, Kong 3.9+) and a self-contained OTLP/HTTP-JSON encoder otherwise; SigNoz accepts both. Traces always encode through the bundled plugin's own pipeline.
+
+## Startup warnings
+
+| Warning | Cause | Effect |
+| --- | --- | --- |
+| `gateway tracer is off` | `traces.enabled=true` with `tracing_instrumentations=off` | No spans exist to export; logs still ship |
+| `bundled opentelemetry plugin is also enabled` | Both plugins active for the same traffic | Spans export twice — disable one |
+
+Warnings are emitted once (worker 0) at configuration time.
 
 ## Plugin scope
 
-Standard Kong semantics — global, per-service, per-route, per-consumer, or any combination. Kong's [plugin precedence rules](https://developer.konghq.com/gateway/entities/plugin/#plugin-precedence) decide which configuration wins when the plugin is enabled at multiple levels.
+Standard Kong semantics — global, per-service, per-route, per-consumer; [plugin precedence](https://developer.konghq.com/gateway/entities/plugin/#plugin-precedence) decides which config wins. Priority 14 (same as the bundled OpenTelemetry plugin).
 
 ## Versioning and compatibility
 
-The plugin delegates to `kong.plugins.opentelemetry.*` modules that are not part of Kong's PDK stability contract. Each release is tested against currently-supported Kong minor versions. Upgrading Kong may require upgrading the plugin.
+Kong Gateway **3.6+**, open-source and Enterprise. The plugin delegates to `kong.plugins.opentelemetry.*` modules that sit outside Kong's PDK stability contract; each release is tested against supported Kong minors (3.6–3.9 at the time of writing). Upgrading Kong may require upgrading the plugin — see [CHANGELOG](../CHANGELOG.md).
