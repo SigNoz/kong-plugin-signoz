@@ -82,14 +82,7 @@ return {
           { logs = {
               type = "record",
               fields = {
-                { instrumentations = {
-                    type    = "array",
-                    default = { "off" },
-                    elements = {
-                      type   = "string",
-                      one_of = { "off", "all", "access", "runtime" },
-                    },
-                } },
+                { enabled = { type = "boolean", default = true } },
               },
           } },
         },

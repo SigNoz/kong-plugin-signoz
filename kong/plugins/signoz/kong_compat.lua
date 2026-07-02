@@ -25,15 +25,8 @@ local function set_traces_endpoint_legacy(oc, url)
   oc.endpoint = url
 end
 
-local function set_logs_endpoint_3_8(oc, url)
-  oc.logs_endpoint = url
-end
-
-local function set_logs_endpoint_noop(_, _) end
-
 _M.set_propagation     = set_propagation_legacy
 _M.set_traces_endpoint = set_traces_endpoint_legacy
-_M.set_logs_endpoint   = set_logs_endpoint_noop
 
 function _M.detect_once()
   if detected then
@@ -52,7 +45,6 @@ function _M.detect_once()
   end
   if _M.is_kong_3_8_plus then
     _M.set_traces_endpoint = set_traces_endpoint_3_8
-    _M.set_logs_endpoint   = set_logs_endpoint_3_8
   end
 
   local ok, v = pcall(kong.node.get_hostname)

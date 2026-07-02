@@ -62,7 +62,7 @@ describe(PLUGIN_NAME .. ": (schema)", function()
     assert.equals("kong", conf.config.resource.service_name)
     assert.is_true(conf.config.traces.enabled)
     assert.equals(1.0, conf.config.traces.sampling_rate)
-    assert.same({ "off" }, conf.config.logs.instrumentations)
+    assert.is_true(conf.config.logs.enabled)
     assert.equals(1000, conf.config.exporter.connect_timeout)
     assert.equals(5000, conf.config.exporter.send_timeout)
     assert.equals(5000, conf.config.exporter.read_timeout)
@@ -70,19 +70,28 @@ describe(PLUGIN_NAME .. ": (schema)", function()
     assert.equals(10000, conf.config.exporter.queue.max_entries)
   end)
 
-  it("accepts logs.instrumentations=[access, runtime]", function()
+  it("accepts logs.enabled=false", function()
     local ok, err = validate({
       exporter = { endpoint = "http://localhost:4318" },
-      logs = { instrumentations = { "access", "runtime" } },
+      logs = { enabled = false },
     })
     assert.is_nil(err)
     assert.is_truthy(ok)
   end)
 
-  it("rejects unknown logs.instrumentations sub-type", function()
+  it("rejects non-boolean logs.enabled", function()
     local ok, err = validate({
       exporter = { endpoint = "http://localhost:4318" },
-      logs = { instrumentations = { "access", "bogus" } },
+      logs = { enabled = "yes" },
+    })
+    assert.is_falsy(ok)
+    assert.is_truthy(err)
+  end)
+
+  it("rejects removed logs.instrumentations field", function()
+    local ok, err = validate({
+      exporter = { endpoint = "http://localhost:4318" },
+      logs = { instrumentations = { "access" } },
     })
     assert.is_falsy(ok)
     assert.is_truthy(err)
