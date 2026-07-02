@@ -10,7 +10,7 @@ local signoz_conf_cache = setmetatable({}, { __mode = "k" })
 ---@field resource { service_name: string, deployment_environment: string|nil }
 ---@field exporter SignozExporterUserConf
 ---@field traces   { enabled: boolean, sampling_rate: number }
----@field logs     { instrumentations: string[] }
+---@field logs     { enabled: boolean }
 
 ---@class SignozExporterUserConf
 ---@field endpoint        string
@@ -40,16 +40,6 @@ local function traces_enabled(conf)
   return conf.traces and conf.traces.enabled
 end
 
-local function runtime_logs_enabled(conf)
-  local list = conf.logs and conf.logs.instrumentations
-  if not list then return false end
-  for _, v in ipairs(list) do
-    if v == "off" then return false end
-    if v == "all" or v == "runtime" then return true end
-  end
-  return false
-end
-
 ---@param conf SignozUserConf
 ---@return table<string,string>
 local function build_resource_attributes(conf)
@@ -65,6 +55,9 @@ local function build_resource_attributes(conf)
   end
   if kong_compat.node_id then
     attrs["service.instance.id"] = kong_compat.node_id
+  end
+  if kong_compat.kong_version then
+    attrs["service.version"] = kong_compat.kong_version
   end
   return attrs
 end
@@ -139,10 +132,6 @@ function _M.otel_conf(conf)
 
   if traces_enabled(conf) then
     kong_compat.set_traces_endpoint(oc, base .. "/v1/traces")
-  end
-
-  if runtime_logs_enabled(conf) then
-    kong_compat.set_logs_endpoint(oc, base .. "/v1/logs")
   end
 
   otel_conf_cache[conf] = oc

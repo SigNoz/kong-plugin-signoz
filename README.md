@@ -1,8 +1,30 @@
 # kong-plugin-signoz
 
-Kong Gateway plugin that ships OTLP traces and logs from Kong to [SigNoz](https://signoz.io).
+Kong Gateway plugin that sends traces and request logs to [SigNoz](https://signoz.io).
 
-Supports Kong Gateway **3.6+** (open-source and Enterprise). Delegates trace export to Kong's bundled [OpenTelemetry plugin](https://developer.konghq.com/plugins/opentelemetry/) and synthesises one structured OTLP log record per request alongside.
+Traces are exported through Kong's bundled [OpenTelemetry plugin](https://developer.konghq.com/plugins/opentelemetry/), with the request span enriched with Kong context: service, route, consumer, and the latency split between Kong and the upstream. Logs are one structured record per request (`GET /payments 200 28ms`), linked to the trace, with the same context as queryable attributes.
+
+Supports Kong Gateway 3.6+ (open-source and Enterprise), OTLP over HTTP.
+
+## What it looks like
+
+Kong as a service in SigNoz, with latency percentiles, request rate, Apdex, and error rate:
+
+![Kong in the SigNoz Services view](docs/assets/services-apm-overview.png)
+
+Gateway traffic in the Traces Explorer, filterable by service, route, consumer, status, or duration:
+
+![Kong spans in the Traces Explorer](docs/assets/traces-explorer.png)
+
+Each trace shows Kong's internal phases in the waterfall. The root span carries the enriched attributes: `http.route`, `kong.consumer.username`, `kong.balancer.tries`, and the `kong.latency.*` split that shows whether time went to Kong or the upstream:
+
+![Trace detail with Kong span attributes](docs/assets/trace-detail-attributes.png)
+
+Every request produces one log record, color-coded by status class. Logs and traces link both ways: a log line opens its trace, and the trace view shows the request's log:
+
+![Logs Explorer with structured request records](docs/assets/logs-explorer.png)
+
+![Request log shown from the trace side](docs/assets/span-to-log-correlation.png)
 
 ## Install
 
@@ -10,98 +32,82 @@ Supports Kong Gateway **3.6+** (open-source and Enterprise). Delegates trace exp
 luarocks install kong-plugin-signoz
 ```
 
-Add `signoz` to the loaded plugins (`kong.conf` or env):
+Add `signoz` to the plugins list in `kong.conf` (or `KONG_PLUGINS`) on every node:
 
 ```ini
 plugins = bundled,signoz
 ```
 
-Restart Kong, then enable the plugin against your gateway, service, route, or consumer.
+## Setup
 
-## Getting Started
-
-Install the plugin, enable Kong's tracer, and ship the first request to SigNoz.
-
-## 1. Install the plugin
-
-The plugin's Lua sources need to be on every Kong node's filesystem. Pick the route that matches your deployment — Kong's [installation and distribution guide](https://developer.konghq.com/custom-plugins/installation-and-distribution/) covers each in depth.
-
-### LuaRocks (host install)
-
-```sh
-luarocks install kong-plugin-signoz
-```
-
-### Load it
-
-After installing, add `signoz` to the loaded plugins in `kong.conf` (or via the `KONG_PLUGINS` environment variable) on every node:
-
-```ini
-plugins = bundled,signoz
-```
-
-## 2. Enable Kong's tracer
-
-The plugin enriches Kong's root request span before export. Kong's tracer must be on for that span to exist. Set in `kong.conf` or via environment (see Kong's [tracing reference](https://developer.konghq.com/gateway/tracing/) for the full list of values):
+1. Enable Kong's tracer (required for traces; logs flow without it):
 
 ```ini
 tracing_instrumentations = all
 tracing_sampling_rate    = 1.0
 ```
 
-Without these, `ngx.ctx.KONG_SPANS` stays empty and no spans are exported. Logs still ship; only the trace path is gated on the tracer being on.
+2. Get your ingestion endpoint and key: SigNoz Cloud under **Settings → Ingestion** ([docs](https://signoz.io/docs/ingestion/signoz-cloud/keys/)); self-hosted, use your collector's OTLP/HTTP port (`4318`), no key.
 
-Restart Kong to pick up both the new plugin and the tracer settings.
-
-## 3. Get your ingestion endpoint and key
-
-**SigNoz Cloud:** find both under **Settings > Ingestion**. See [Ingestion Keys](https://signoz.io/docs/ingestion/signoz-cloud/keys/).
-
-**Self-hosted:** point `exporter.endpoint` at your OTel collector's OTLP/HTTP port (default `4318`). No key required.
-
-## 4. Enable the plugin
-
-Globally on the gateway (Cloud example):
+3. Enable the plugin:
 
 ```sh
 curl -X POST http://localhost:8001/plugins \
   --data "name=signoz" \
   --data "config.exporter.endpoint=https://ingest.<region>.signoz.cloud:443" \
-  --data "config.exporter.key=<your-ingestion-key>" \
-  --data "config.resource.service_name=kong" \
-  --data "config.resource.deployment_environment=production" \
-  --data "config.logs.instrumentations=access"
+  --data "config.exporter.key=<your-ingestion-key>"
 ```
 
-Self-hosted equivalent:
+4. Send a request through the gateway. Kong shows up under Services in SigNoz, spans in the Traces Explorer, one log per request in the Logs Explorer.
 
-```sh
-curl -X POST http://localhost:8001/plugins \
-  --data "name=signoz" \
-  --data "config.exporter.endpoint=http://signoz-otel-collector:4318" \
-  --data "config.resource.service_name=kong" \
-  --data "config.logs.instrumentations=access"
+For `https://` endpoints, Kong needs a CA trust store: `lua_ssl_trusted_certificate = system`, `lua_ssl_verify_depth = 3`. Errors are logged with a `[signoz]` prefix and in queue warnings.
+
+## Configuration
+
+```yaml
+config:
+  resource:
+    service_name: kong
+    deployment_environment: production
+  exporter:
+    endpoint: https://ingest.<region>.signoz.cloud:443   # http(s) only
+    key: <ingestion-key>                                 # Kong Vault-referenceable
+  traces:
+    enabled: true
+    sampling_rate: 1.0
+  logs:
+    enabled: true
 ```
 
-The plugin can also be scoped per-service, per-route, or per-consumer using the standard Kong [Admin API](https://developer.konghq.com/admin-api/). See Kong's [Plugin entity](https://developer.konghq.com/gateway/entities/plugin/) docs for scoping syntax.
+All fields, defaults, and emitted attributes: [docs/reference.md](docs/reference.md).
 
-## 5. Verify
+## What gets captured
 
-Send a request through Kong:
+Each trace span and request log carries:
 
-```sh
-curl -i http://localhost:8000/<your-route>
-```
+- **Request:** method, path, scheme, protocol version, user agent
+- **Response:** status code, request and response sizes
+- **Timing:** total duration, split into gateway (Kong) latency and upstream latency
+- **Kong context:** service, route, consumer (when authenticated), retry count, upstream status
+- **Network:** client address, upstream address
+- **Identity:** service name, environment, hostname, node ID, Kong version
 
-In SigNoz:
+Never captured: headers, query strings, request and response payloads.
 
-- **Services** view shows `kong` with traffic.
-- **Traces Explorer** lists spans named `kong` with attributes `kong.service.name`, `kong.route.name`, and HTTP semconv fields.
-- **Logs Explorer** lists one record per request with body shaped `"<METHOD> <path> <status> <duration>ms"` and severity coloured by status class.
+## Built on Kong
 
-If nothing arrives within ~5 seconds, check Kong's error log for `[signoz]` entries — exporter HTTP errors and queue drops are logged there.
+- Trace export is delegated to Kong's bundled OpenTelemetry plugin; the request log is built with Kong's public PDK (`kong.log.serialize`).
+- Metrics and runtime/error logs are left to Kong's own plugins: native OTLP metrics (Gateway 3.13+) and the bundled OpenTelemetry plugin.
+- The plugin warns at startup if the tracer is off, or if the bundled `opentelemetry` plugin is enabled alongside (spans would export twice).
 
-## What's next
+## Development
 
-- [Reference](docs/reference.md) for understanding every field, default, and behaviour.
-- [Ingestion overview](https://signoz.io/docs/ingestion/signoz-cloud/overview/) for checking out endpoints by region, auth headers
+`docs/examples/` runs Kong DB-less with the plugin source mounted. Tests: `busted spec/unit`. Lint: `luacheck kong spec`.
+
+## Support
+
+Maintained by SigNoz. [Issues](https://github.com/SigNoz/kong-plugin-signoz/issues) · [Docs](https://signoz.io/docs/integrations/outposts/kong/)
+
+## License
+
+See [LICENSE](LICENSE).
