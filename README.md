@@ -68,7 +68,7 @@ Send a request through the gateway, then check SigNoz:
 - **Traces Explorer** shows gateway spans with `kong.service.name`, `kong.route.name`, and the latency split.
 - **Logs Explorer** shows one record per request, one click away from its trace.
 
-If nothing arrives within ~5 seconds, check Kong's error log for `[signoz]` entries and queue warnings.
+If nothing arrives within ~5 seconds, check Kong's error log for `[signoz]` entries and queue warnings. The most common cause with `https://` endpoints is a missing CA trust store — set `lua_ssl_trusted_certificate = system` and `lua_ssl_verify_depth = 3` (see the [reference](docs/reference.md#configexporter--destination-and-transport)).
 
 ## Configuration
 

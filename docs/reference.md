@@ -33,6 +33,8 @@ config:
 | Field | Required | Default | Notes |
 | --- | --- | --- | --- |
 | `exporter.endpoint` | yes | — | Base URL of the SigNoz OTLP/HTTP endpoint; `/v1/traces` and `/v1/logs` are appended internally. **`http://` or `https://` only** — `grpc://`/`grpcs://` are rejected at validation. |
+
+> **`https://` endpoints need a CA trust store.** Kong verifies outbound TLS against `lua_ssl_trusted_certificate`, which many container setups leave unset — every export then fails with `unable to get local issuer certificate` in the queue warnings. Set `lua_ssl_trusted_certificate = system` and `lua_ssl_verify_depth = 3` in `kong.conf` (or `KONG_LUA_SSL_TRUSTED_CERTIFICATE=system`, `KONG_LUA_SSL_VERIFY_DEPTH=3`).
 | `exporter.key` | no | — | Sent as the `signoz-ingestion-key` header. Required for SigNoz Cloud, omit for self-hosted. Encrypted; referenceable via [Kong Vault](https://developer.konghq.com/gateway/secrets-management/). |
 | `exporter.connect_timeout` | no | `1000` | OTLP POST connect timeout (ms). |
 | `exporter.send_timeout` | no | `5000` | OTLP POST send timeout (ms). |
